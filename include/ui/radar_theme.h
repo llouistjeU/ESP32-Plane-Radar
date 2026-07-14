@@ -88,6 +88,12 @@ constexpr uint8_t kRunwayB = 170;
 constexpr uint8_t kRunwayLabelR = 110;
 constexpr uint8_t kRunwayLabelG = 210;
 constexpr uint8_t kRunwayLabelB = 230;
+/** Favorite-aircraft ring + tag highlight. Bright cyan: nothing else on the
+ *  radar uses it, so it reads as "special" rather than blending with the
+ *  (already red) aircraft symbol or the (already amber) type tag. */
+constexpr uint8_t kFavoriteR = 0;
+constexpr uint8_t kFavoriteG = 255;
+constexpr uint8_t kFavoriteB = 255;
 
 extern uint16_t kColorBackground;
 extern uint16_t kColorGrid;
@@ -99,5 +105,6 @@ extern uint16_t kColorTagType;
 extern uint16_t kColorTagAltitude;
 extern uint16_t kColorRunway;
 extern uint16_t kColorRunwayLabel;
+extern uint16_t kColorFavorite;
 
 }  // namespace ui::radar
