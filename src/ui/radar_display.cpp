@@ -7,6 +7,7 @@
 #include <cstdlib>
 
 #include "config.h"
+#include "data/aircraft_types.h"
 #include "hardware/display.h"
 #include "hardware/display_font.h"
 #include "services/adsb_client.h"
@@ -197,6 +198,15 @@ void initPalette() {
       tft.color565(radar::kRunwayR, radar::kRunwayG, radar::kRunwayB);
   radar::kColorRunwayLabel = tft.color565(radar::kRunwayLabelR, radar::kRunwayLabelG,
                                           radar::kRunwayLabelB);
+  // Same BGR panel quirk as the aircraft color above: swap R/B so the
+  // configured hue renders correctly on this display.
+  if (config::kDisplayRgbOrder) {
+    radar::kColorFavorite =
+        tft.color565(radar::kFavoriteB, radar::kFavoriteG, radar::kFavoriteR);
+  } else {
+    radar::kColorFavorite =
+        tft.color565(radar::kFavoriteR, radar::kFavoriteG, radar::kFavoriteB);
+  }
 }
 
 constexpr float kKmPerDeg = 111.0f;
@@ -370,6 +380,17 @@ void drawSpeedVector(int cx, int cy, float heading_deg, float track_deg,
                        color);
 }
 
+/** Ring drawn around favorite aircraft (config::kFavoriteAircraftPrefixes),
+ *  clear of the heading triangle/tail so it reads as a halo, not a collision. */
+void drawFavoriteHighlight(int cx, int cy) {
+  constexpr int kRingRadius =
+      radar::kAircraftNoseLenPx + radar::kAircraftTailHalfPx + 3;
+  constexpr int kRingThickness = 2;
+  for (int i = 0; i < kRingThickness; ++i) {
+    s_draw->drawCircle(cx, cy, kRingRadius + i, radar::kColorFavorite);
+  }
+}
+
 void applyTagStyle() {
   if (s_tag_use_vlw) {
     displayFontSetSmoothSize(*s_draw, s_tag_vlw_size);
@@ -388,7 +409,7 @@ int measureTagBlockWidth(const services::adsb::Aircraft& plane) {
     }
   }
   if (plane.type[0] != '\0') {
-    const int w = s_draw->textWidth(plane.type);
+    const int w = s_draw->textWidth(data::aircraft_types::modelName(plane.type));
     if (w > max_w) {
       max_w = w;
     }
@@ -434,8 +455,10 @@ void drawAircraftTag(int x, int y, const services::adsb::Aircraft& plane) {
   ly += line_h;
 
   if (plane.type[0] != '\0') {
-    s_draw->setTextColor(radar::kColorTagType, radar::kColorBackground);
-    s_draw->drawString(plane.type, anchor_x, ly);
+    const bool favorite = data::aircraft_types::isFavoriteType(plane.type);
+    s_draw->setTextColor(favorite ? radar::kColorFavorite : radar::kColorTagType,
+                         radar::kColorBackground);
+    s_draw->drawString(data::aircraft_types::modelName(plane.type), anchor_x, ly);
   }
   ly += line_h;
 
@@ -533,6 +556,9 @@ void drawAircraft() {
     const size_t i = items[d].index;
     const int x = items[d].x;
     const int y = items[d].y;
+    if (data::aircraft_types::isFavoriteType(planes[i].type)) {
+      drawFavoriteHighlight(x, y);
+    }
     drawSpeedVector(x, y, planes[i].nose_deg, planes[i].track_deg,
                     planes[i].gs_knots, radar::kColorTrackVector);
     drawHeadingTriangle(x, y, planes[i].nose_deg, radar::kColorAircraft);
