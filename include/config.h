@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 
 #include <driver/gpio.h>
@@ -54,6 +55,15 @@ constexpr unsigned long kAdsbFetchIntervalMs = 3000;
 constexpr float kAdsbFetchRadiusScale = 1.0f;
 /** false = hide aircraft with alt_baro "ground"; true = show them too. */
 constexpr bool kAdsbShowGroundAircraft = false;
+
+// --- Favorite aircraft highlight ---
+/** ICAO type-designator prefixes to highlight on the radar. Prefix match, so
+ *  "B74" covers every 747 variant (B741/B742/B743/B744/B748) and "A38"
+ *  covers the A380 (A388). Add your own, e.g. "B77W" for just the 777-300ER,
+ *  or "CONC" if you're feeling lucky. */
+constexpr const char* kFavoriteAircraftPrefixes[] = {"B74", "A38"};
+constexpr size_t kFavoriteAircraftPrefixCount =
+    sizeof(kFavoriteAircraftPrefixes) / sizeof(kFavoriteAircraftPrefixes[0]);
 
 // --- UI colors (RGB565) — status screens ---
 constexpr uint16_t kColorBlack = 0x0000;
