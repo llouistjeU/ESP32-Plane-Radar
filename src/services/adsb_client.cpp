@@ -2,7 +2,7 @@
 
 #include <HTTPClient.h>
 #include <WiFiClientSecure.h>
-
+#include <WiFi.h>
 #include <ArduinoJson.h>
 
 #include <cstring>
@@ -16,7 +16,7 @@ namespace {
 constexpr char kApiBase[] = "https://opendata.adsb.fi/api/v3/lat/";
 constexpr float kKmPerNm = 1.852f;
 constexpr int kConnectAttemptMs = 200;
-constexpr unsigned long kRequestTimeoutMs = 10000;
+constexpr unsigned long kRequestTimeoutMs = 20000;
 
 Aircraft s_aircraft[kMaxAircraft];
 size_t s_aircraft_count = 0;
@@ -57,7 +57,7 @@ bool readResponseBodyWithPoll(HTTPClient& http, String& payload) {
     payload.reserve(static_cast<unsigned>(content_length + 1));
   }
 
-  uint8_t buffer[512];
+  uint8_t buffer[2048];
   const unsigned long deadline = millis() + kRequestTimeoutMs;
   while (millis() < deadline) {
     pollNetwork();
@@ -234,8 +234,8 @@ bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
 
 String payload;
 const bool got_body = readResponseBodyWithPoll(http, payload);
-Serial.printf("adsb: content-length=%d, payload received=%u bytes\n",
-              http.getSize(), static_cast<unsigned>(payload.length()));
+Serial.printf("adsb: content-length=%d, payload received=%u bytes, RSSI=%d dBm\n",
+              http.getSize(), static_cast<unsigned>(payload.length()), WiFi.RSSI());
 if (!got_body) {
   Serial.println("adsb: empty response");
   http.end();
