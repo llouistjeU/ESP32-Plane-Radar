@@ -240,13 +240,42 @@ bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
   }
   http.end();
 
-  JsonDocument doc;
-  const DeserializationError err = deserializeJson(doc, payload);
-  if (err) {
-    Serial.printf("adsb: JSON parse error: %s\n", err.c_str());
-    return false;
-  }
 
+
+  
+JsonDocument filter;
+JsonObject filter_ac = filter["ac"].add<JsonObject>();
+filter_ac["lat"] = true;
+filter_ac["lon"] = true;
+filter_ac["true_heading"] = true;
+filter_ac["mag_heading"] = true;
+filter_ac["track"] = true;
+filter_ac["dir"] = true;
+filter_ac["gs"] = true;
+filter_ac["tas"] = true;
+filter_ac["ias"] = true;
+filter_ac["flight"] = true;
+filter_ac["hex"] = true;
+filter_ac["t"] = true;
+filter_ac["alt_baro"] = true;
+filter_ac["alt_geom"] = true;
+
+const uint32_t heap_before = ESP.getFreeHeap();
+JsonDocument doc;
+const DeserializationError err =
+    deserializeJson(doc, payload, DeserializationOption::Filter(filter));
+Serial.printf("adsb: free heap before/after parse: %u / %u bytes\n",
+              heap_before, ESP.getFreeHeap());
+if (err) {
+  Serial.printf("adsb: JSON parse error: %s\n", err.c_str());
+  return false;
+}
+
+
+
+
+
+  
   JsonArray ac = doc["ac"].as<JsonArray>();
   if (ac.isNull()) {
     s_aircraft_count = 0;
