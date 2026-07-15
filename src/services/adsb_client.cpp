@@ -89,6 +89,21 @@ bool readResponseBodyWithPoll(HTTPClient& http, String& payload) {
   // throughput is unaffected) but places it in fixed storage instead of on
   // the stack.
   static uint8_t buffer[4096];
+  // Confirmed upstream quirk (espressif/arduino-esp32 #2147): available()
+  // can report 0 immediately after the connection closes even though some
+  // decrypted data is still sitting in an internal buffer, not yet
+  // surfaced. Breaking the instant we see "disconnected + nothing
+  // available" risks discarding that tail end — likely why larger
+  // responses (busier airspace, e.g. London) were consistently missing a
+  // large chunk near the end regardless of total size. Instead: only treat
+  // "disconnected + nothing available" as truly done once that condition
+  // has held for a sustained window, giving any late-surfacing buffered
+  // bytes a chance to appear first. content_length being reached, or the
+  // overall deadline, remain the other (unconditional) ways to stop.
+  constexpr unsigned long kDisconnectGraceMs = 250;
+  unsigned long disconnected_since = 0;
+  const unsigned long read_start = millis();
+  const char* exit_reason = "deadline";
   const unsigned long deadline = millis() + kRequestTimeoutMs;
   while (millis() < deadline) {
     pollNetwork();
@@ -105,13 +120,29 @@ bool readResponseBodyWithPoll(HTTPClient& http, String& payload) {
     }
     if (content_length > 0 &&
         static_cast<int>(payload.length()) >= content_length) {
+      exit_reason = "complete";
       break;
     }
     if (!http.connected() && stream->available() <= 0) {
-      break;
+      if (disconnected_since == 0) {
+        disconnected_since = millis();
+      } else if (millis() - disconnected_since >= kDisconnectGraceMs) {
+        exit_reason = "disconnected";
+        break;
+      }
+    } else {
+      disconnected_since = 0;
     }
     delay(1);
   }
+
+  // The decisive measurement: how long the loop ran, and why it stopped.
+  // "disconnected" after only a few hundred ms = the connection closed on us
+  // long before all the data arrived (nothing we can fix by waiting longer).
+  // "deadline" after ~20s = data kept trickling but never finished in time.
+  // Without this, any explanation for the truncation is guesswork.
+  Serial.printf("adsb: read loop %lu ms, exit=%s\n", millis() - read_start,
+                exit_reason);
 
   return payload.length() > 0;
 }
