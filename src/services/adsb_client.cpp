@@ -232,15 +232,16 @@ bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
     return false;
   }
 
-  String payload;
-  if (!readResponseBodyWithPoll(http, payload)) {
-    Serial.println("adsb: empty response");
-    http.end();
-    return false;
-  }
+String payload;
+const bool got_body = readResponseBodyWithPoll(http, payload);
+Serial.printf("adsb: content-length=%d, payload received=%u bytes\n",
+              http.getSize(), static_cast<unsigned>(payload.length()));
+if (!got_body) {
+  Serial.println("adsb: empty response");
   http.end();
-
-
+  return false;
+}
+http.end();
 
   
 JsonDocument filter;
