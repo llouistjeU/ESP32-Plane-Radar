@@ -22,7 +22,15 @@ Aircraft s_aircraft[kMaxAircraft];
 size_t s_aircraft_count = 0;
 PollFn s_poll_fn = nullptr;
 
+constexpr unsigned long kPollThrottleMs = 20;
+unsigned long s_last_poll_ms = 0;
+
 void pollNetwork() {
+  const unsigned long now = millis();
+  if (now - s_last_poll_ms < kPollThrottleMs) {
+    return;
+  }
+  s_last_poll_ms = now;
   if (s_poll_fn != nullptr) {
     s_poll_fn();
   }
@@ -57,7 +65,7 @@ bool readResponseBodyWithPoll(HTTPClient& http, String& payload) {
     payload.reserve(static_cast<unsigned>(content_length + 1));
   }
 
-  uint8_t buffer[2048];
+  uint8_t buffer[4096];
   const unsigned long deadline = millis() + kRequestTimeoutMs;
   while (millis() < deadline) {
     pollNetwork();
