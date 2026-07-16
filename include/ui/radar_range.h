@@ -30,6 +30,7 @@ constexpr RangePreset kRangePresets[] = {
     {15.0f, 15.0f * kRing3ToOuterKm},
     {20.0f, 20.0f * kRing3ToOuterKm},
     {25.0f, 25.0f * kRing3ToOuterKm},
+    {30.0f, 30.0f * kRing3ToOuterKm},
 };
 
 constexpr size_t kRangePresetCount =
