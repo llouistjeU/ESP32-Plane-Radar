@@ -66,87 +66,6 @@ int performGetWithPoll(HTTPClient& http) {
   return HTTPC_ERROR_READ_TIMEOUT;
 }
 
-bool readResponseBodyWithPoll(HTTPClient& http, String& payload) {
-  WiFiClient* stream = http.getStreamPtr();
-  if (stream == nullptr) {
-    return false;
-  }
-
-  const int content_length = http.getSize();
-  if (content_length > 0) {
-    payload.reserve(static_cast<unsigned>(content_length + 1));
-  }
-
-  // static, not a stack-local array: mbedTLS (which WiFiClientSecure uses
-  // under the hood for the HTTPS connection) is documented to use a
-  // significant amount of stack itself during TLS record decryption. The
-  // ESP32's default loop-task stack is only 8 KB total; stacking a 4096-byte
-  // buffer on top of whatever mbedTLS needs, right at the point where it's
-  // actively decrypting incoming data, risks a stack overflow — which
-  // corrupts nearby memory in unpredictable ways and could explain the
-  // erratic symptoms (garbled JSON, spurious WiFi reconnects) seen at larger
-  // payload sizes. `static` keeps the same 4096-byte chunk size (so read
-  // throughput is unaffected) but places it in fixed storage instead of on
-  // the stack.
-  static uint8_t buffer[4096];
-  // Confirmed upstream quirk (espressif/arduino-esp32 #2147): available()
-  // can report 0 immediately after the connection closes even though some
-  // decrypted data is still sitting in an internal buffer, not yet
-  // surfaced. Breaking the instant we see "disconnected + nothing
-  // available" risks discarding that tail end — likely why larger
-  // responses (busier airspace, e.g. London) were consistently missing a
-  // large chunk near the end regardless of total size. Instead: only treat
-  // "disconnected + nothing available" as truly done once that condition
-  // has held for a sustained window, giving any late-surfacing buffered
-  // bytes a chance to appear first. content_length being reached, or the
-  // overall deadline, remain the other (unconditional) ways to stop.
-  constexpr unsigned long kDisconnectGraceMs = 250;
-  unsigned long disconnected_since = 0;
-  const unsigned long read_start = millis();
-  const char* exit_reason = "deadline";
-  const unsigned long deadline = millis() + kRequestTimeoutMs;
-  while (millis() < deadline) {
-    pollNetwork();
-    const int available = stream->available();
-    if (available > 0) {
-      const int to_read =
-          available > static_cast<int>(sizeof(buffer)) ? static_cast<int>(sizeof(buffer))
-                                                       : available;
-      const int read_bytes = stream->readBytes(buffer, to_read);
-      if (read_bytes > 0) {
-        payload.concat(reinterpret_cast<const char*>(buffer),
-                       static_cast<unsigned>(read_bytes));
-      }
-    }
-    if (content_length > 0 &&
-        static_cast<int>(payload.length()) >= content_length) {
-      exit_reason = "complete";
-      break;
-    }
-    if (!http.connected() && stream->available() <= 0) {
-      if (disconnected_since == 0) {
-        disconnected_since = millis();
-      } else if (millis() - disconnected_since >= kDisconnectGraceMs) {
-        exit_reason = "disconnected";
-        break;
-      }
-    } else {
-      disconnected_since = 0;
-    }
-    delay(1);
-  }
-
-  // The decisive measurement: how long the loop ran, and why it stopped.
-  // "disconnected" after only a few hundred ms = the connection closed on us
-  // long before all the data arrived (nothing we can fix by waiting longer).
-  // "deadline" after ~20s = data kept trickling but never finished in time.
-  // Without this, any explanation for the truncation is guesswork.
-  Serial.printf("adsb: read loop %lu ms, exit=%s\n", millis() - read_start,
-                exit_reason);
-
-  return payload.length() > 0;
-}
-
 float kmToNauticalMiles(float km) { return km / kKmPerNm; }
 
 bool readJsonFloat(const JsonObject& obj, const char* key, float* out) {
@@ -294,37 +213,10 @@ bool fetchUpdateOnce(double center_lat, double center_lon, float fetch_radius_km
     return false;
   }
 
-  String payload;
-  const bool got_body = readResponseBodyWithPoll(http, payload);
-  // Diagnostic: if content_length is -1, the server didn't declare a fixed
-  // size up front (e.g. chunked transfer) and we're relying on the
-  // connection closing to know we're done. If content_length is a real
-  // number but payload_bytes is smaller, the read loop above hit its
-  // timeout (or the connection dropped) before the full body arrived —
-  // that's a truncated payload, not a memory problem, and explains
-  // InvalidInput/IncompleteInput parse errors even with plenty of free heap.
-  // RSSI (WiFi signal strength, dBm): roughly -30 to -60 = strong,
-  // -60 to -75 = ok, below -80 = weak enough to genuinely slow transfers.
-  // Logged here to separate "weak signal" from "read-loop overhead" as the
-  // cause of a slow/truncated fetch — the content-length vs received
-  // comparison alone can't tell those two apart.
-  Serial.printf("adsb: content-length=%d, payload received=%u bytes, RSSI=%d dBm\n",
-                http.getSize(), static_cast<unsigned>(payload.length()), WiFi.RSSI());
-  if (!got_body) {
-    Serial.println("adsb: empty response");
-    http.end();
-    return false;
-  }
-  http.end();
-
   // adsb.fi/readsb returns ~25-35 fields per aircraft (squawk, category,
-  // nav_*, rssi, seen, messages, ...) of which this radar only reads 9. On a
-  // busy 20-25 km radius near dense airspace, parsing (and holding in RAM)
-  // every field for every aircraft can exceed what the ESP32-C3's limited
-  // heap can handle — on top of the memory the HTTPS/TLS connection itself
-  // already needs. A filter tells the parser to skip everything else,
-  // cutting peak memory use (and parse time) roughly in proportion to how
-  // many fields we drop.
+  // nav_*, rssi, seen, messages, ...) of which this radar only reads 9. The
+  // filter tells the parser to skip everything else, cutting both parse time
+  // and peak memory roughly in proportion to how many fields we drop.
   JsonDocument filter;
   JsonObject filter_ac = filter["ac"].add<JsonObject>();
   filter_ac["lat"] = true;
@@ -342,14 +234,32 @@ bool fetchUpdateOnce(double center_lat, double center_lon, float fetch_radius_km
   filter_ac["alt_baro"] = true;
   filter_ac["alt_geom"] = true;
 
-  const uint32_t heap_before = ESP.getFreeHeap();
+  // Measured: a healthy ~10 KB response finished in 84 ms, while every
+  // failure spent the full 20 s and still only ever accumulated ~8-12 KB.
+  // That is not a slow network — it's the old approach collecting the whole
+  // body into one String first, which needs a single *contiguous* heap block
+  // the size of the response. Total free heap looked fine (~27 KB), but heap
+  // fragmentation means the largest contiguous block can be far smaller, so
+  // growing the String past ~10 KB fails and the read loop then spins
+  // pointlessly until the deadline. Parsing straight from the network stream
+  // removes the big String entirely: ArduinoJson consumes the body
+  // incrementally and only ever holds the small filtered result.
+  //
+  // largest block = biggest single contiguous allocation still possible. If
+  // this sits near ~10 KB while free heap reads ~27 KB, fragmentation is
+  // confirmed as the cause of the old failures.
+  Serial.printf("adsb: content-length=%d, free heap=%u, largest block=%u, RSSI=%d dBm\n",
+                http.getSize(), ESP.getFreeHeap(), ESP.getMaxAllocHeap(),
+                WiFi.RSSI());
+
+  const unsigned long parse_start = millis();
   JsonDocument doc;
-  const DeserializationError err =
-      deserializeJson(doc, payload, DeserializationOption::Filter(filter));
-  Serial.printf("adsb: free heap before/after parse: %u / %u bytes\n",
-                heap_before, ESP.getFreeHeap());
+  const DeserializationError err = deserializeJson(
+      doc, http.getStream(), DeserializationOption::Filter(filter));
+  Serial.printf("adsb: stream parse %lu ms, result=%s, free heap=%u\n",
+                millis() - parse_start, err.c_str(), ESP.getFreeHeap());
+  http.end();
   if (err) {
-    Serial.printf("adsb: JSON parse error: %s\n", err.c_str());
     return false;
   }
 
@@ -385,15 +295,12 @@ bool fetchUpdateOnce(double center_lat, double center_lon, float fetch_radius_km
   return true;
 }
 
-// Failures at larger payload sizes (~11-14 KB) turned out to be
-// intermittent — near-identical sizes sometimes arrive complete and
-// sometimes get cut short, consistent with occasional WiFi packet loss
-// rather than a fixed software bottleneck (that part's already addressed
-// above via the buffer size, poll throttling, and wider timeout). Retrying
-// immediately on failure, instead of waiting out the rest of the normal
-// fetch interval, means a single bad read no longer leaves stale aircraft
-// positions on screen for a full cycle (or several, if the run of bad luck
-// continues) — it just tries again right away.
+// A retry costs one extra request but avoids leaving stale aircraft
+// positions on screen for a whole cycle when a fetch does fail (bad HTTP
+// code, or a parse error on a genuinely malformed/interrupted response).
+// Note: earlier this was meant to paper over truncated reads; the timing
+// measurement showed those were caused by the String-based body collection
+// (see above), which streaming now removes at the source.
 constexpr int kMaxFetchAttempts = 3;
 
 bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
