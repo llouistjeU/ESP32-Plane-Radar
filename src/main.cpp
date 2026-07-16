@@ -13,6 +13,7 @@
 #include "ui/radar_display.h"
 #include "ui/radar_range.h"
 #include "ui/status_screens.h"
+#include "debug.h"
 
 namespace {
 
@@ -34,7 +35,7 @@ void onRangeTap() {
   ui::radar::rangeNext();
   char range_label[12];
   ui::radar::formatCurrentRing3Label(range_label, sizeof(range_label));
-  Serial.printf("Range: %s (outer ~%.0f km)\n", range_label,
+  LOGF("Range: %s (outer ~%.0f km)\n", range_label,
                 ui::radar::rangeCurrent().outer_km);
 
   if (g_radar_visible && WiFi.status() == WL_CONNECTED) {
@@ -47,6 +48,18 @@ void handleBootButton() {
   if (bootButtonConsumeTap()) {
     onRangeTap();
   }
+}
+
+/** Passed to services::adsb::setPollFn(): invoked repeatedly *during* the
+ *  blocking ADS-B HTTP fetch (both while waiting for a response and while
+ *  streaming the body). Without this, a button tap during a slow fetch
+ *  (bigger radius = bigger response = slower) just sits unnoticed until the
+ *  fetch finishes — this makes range switches take effect immediately
+ *  instead. Safe to call rapidly: the shared aircraft array is only touched
+ *  after both network-wait loops finish, never while they're polling. */
+void pollNetworkAndButton() {
+  wifiLoop();
+  handleBootButton();
 }
 
 void fetchAndDrawAircraft() {
@@ -63,10 +76,17 @@ void fetchAndDrawAircraft() {
 }  // namespace
 
 void setup() {
-  Serial.begin(115200);
-  delay(500);
-  Serial.println();
-  Serial.println("Plane Radar");
+  // Gated too: with kDebugLog off there's no reason to bring up the USB CDC
+  // port at all, and not starting it is what actually removes any chance of
+  // the board waiting on a serial host that isn't there. The 500 ms delay is
+  // only there to give the port time to enumerate before the first log line,
+  // so it goes with it — boot is that bit quicker as a bonus.
+  if constexpr (kDebugLog) {
+    Serial.begin(115200);
+    delay(500);
+  }
+  LOGLN();
+  LOGLN("Plane Radar");
 
   bootButtonInit();
   displayInit();
@@ -75,7 +95,7 @@ void setup() {
   }
   services::location::init();
   ui::radar::rangeInit();
-  services::adsb::setPollFn(wifiLoop);
+  services::adsb::setPollFn(pollNetworkAndButton);
 
   if (wifiSetupConnect()) {
     showRadarIfConnected();
@@ -88,7 +108,7 @@ void loop() {
 
   if (WiFi.status() != WL_CONNECTED) {
     if (g_radar_visible) {
-      Serial.println("WiFi lost — will reconnect");
+      LOGLN("WiFi lost — will reconnect");
       g_radar_visible = false;
     }
 
@@ -110,8 +130,8 @@ void loop() {
     if (!g_radar_visible) {
       showRadarIfConnected();
     } else if (millis() - g_last_adsb_fetch_ms >= config::kAdsbFetchIntervalMs) {
-      g_last_adsb_fetch_ms = millis();
       fetchAndDrawAircraft();
+      g_last_adsb_fetch_ms = millis();
     }
   }
 
