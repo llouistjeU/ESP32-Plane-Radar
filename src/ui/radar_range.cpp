@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include "debug.h"
 
 namespace ui::radar {
 
@@ -96,13 +97,13 @@ bool showRunways() { return s_show_runways; }
 void saveMilesFromPortal(const char* checkbox_value) {
   s_use_miles = portalCheckboxChecked(checkbox_value);
   saveUseMiles();
-  Serial.printf("Distance units: %s\n", s_use_miles ? "miles" : "km");
+  LOGF("Distance units: %s\n", s_use_miles ? "miles" : "km");
 }
 
 void saveRunwaysFromPortal(const char* checkbox_value) {
   s_show_runways = portalCheckboxChecked(checkbox_value);
   saveShowRunways();
-  Serial.printf("Runway overlay: %s\n", s_show_runways ? "on" : "off");
+  LOGF("Runway overlay: %s\n", s_show_runways ? "on" : "off");
 }
 
 void formatRing3Label(char* buf, size_t len, float ring3_km, bool use_miles) {

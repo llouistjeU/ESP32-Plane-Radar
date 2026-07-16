@@ -15,6 +15,7 @@
 #include "ui/radar_range.h"
 #include "ui/radar_theme.h"
 #include "ui/runway_overlay.h"
+#include "debug.h"
 
 
 namespace ui {
@@ -688,7 +689,7 @@ bool ensureFrameSprite() {
   }
   s_frame.setColorDepth(16);
   if (!s_frame.createSprite(radar::kSize, radar::kSize)) {
-    Serial.println("radar: frame sprite alloc failed");
+    LOGLN("radar: frame sprite alloc failed");
     return false;
   }
   s_frame_ready = true;
