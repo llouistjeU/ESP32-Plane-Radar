@@ -17,6 +17,7 @@
 #include "services/radar_location.h"
 #include "ui/radar_range.h"
 #include "ui/status_screens.h"
+#include "debug.h"
 
 portMUX_TYPE s_boot_mux = portMUX_INITIALIZER_UNLOCKED;
 volatile bool s_boot_tap_pending = false;
@@ -102,7 +103,7 @@ void refreshPortalParamDefaults() {
 void onPortalParamsSaved() {
   if (!services::location::saveFromStrings(s_param_lat.getValue(),
                                            s_param_lon.getValue())) {
-    Serial.println("Invalid lat/lon in portal — keeping previous location");
+    LOGLN("Invalid lat/lon in portal — keeping previous location");
   }
   ui::radar::saveMilesFromPortal(s_param_miles.getValue());
   ui::radar::saveRunwaysFromPortal(s_param_runways.getValue());
@@ -191,7 +192,7 @@ void resetWifiCredentials() {
   eraseWifiCredentials();
   services::location::clear();
   ui::radar::unitsReset();
-  Serial.println("WiFi credentials, location, and units cleared");
+  LOGLN("WiFi credentials, location, and units cleared");
 }
 
 void onConfigPortalApStarted(WiFiManager*) {
@@ -200,13 +201,13 @@ void onConfigPortalApStarted(WiFiManager*) {
 #ifdef WM_MDNS
   if (MDNS.begin(config::kPortalHostname)) {
     MDNS.addService("http", "tcp", 80);
-    Serial.printf("Setup portal: http://%s.local (or http://%s)\n",
+    LOGF("Setup portal: http://%s.local (or http://%s)\n",
                   config::kPortalHostname, config::kPortalIp);
   } else {
-    Serial.printf("Setup portal: http://%s (mDNS unavailable)\n", config::kPortalIp);
+    LOGF("Setup portal: http://%s (mDNS unavailable)\n", config::kPortalIp);
   }
 #else
-  Serial.printf("Setup portal: http://%s\n", config::kPortalIp);
+  LOGF("Setup portal: http://%s\n", config::kPortalIp);
 #endif
 }
 
@@ -243,7 +244,7 @@ void startLanWebPortal() {
   }
 #endif
   s_wm.startWebPortal();
-  Serial.printf("LAN config: http://%s.local or http://%s\n",
+  LOGF("LAN config: http://%s.local or http://%s\n",
                 config::kPortalHostname, WiFi.localIP().toString().c_str());
 }
 
@@ -298,7 +299,7 @@ bool tryConnectWithUi(const String& ssid, const String& pass, bool show_ui) {
 
   for (uint8_t attempt = 1; attempt <= config::kWifiConnectAttempts; ++attempt) {
     if (attempt > 1) {
-      Serial.printf("WiFi connect retry %u/%u\n", attempt,
+      LOGF("WiFi connect retry %u/%u\n", attempt,
                     config::kWifiConnectAttempts);
       WiFi.disconnect(true);
       WiFi.mode(WIFI_OFF);
@@ -391,7 +392,7 @@ void bootButtonPollLongPress() {
     if (!s_long_press_handled &&
         millis() - down_ms >= config::kBootResetHoldMs) {
       s_long_press_handled = true;
-      Serial.println("BOOT held — resetting WiFi");
+      LOGLN("BOOT held — resetting WiFi");
       wifiResetCredentialsAndReboot();
     }
   } else {
@@ -411,7 +412,7 @@ void wifiResetCredentialsAndReboot() {
 
 bool wifiReconnect() {
   initBootButton();
-  Serial.println("WiFi reconnecting...");
+  LOGLN("WiFi reconnecting...");
   return connectSavedNetwork(true);
 }
 
@@ -444,48 +445,48 @@ bool wifiSetupConnect() {
   }
 
   if (force_portal) {
-    Serial.println("Opening WiFi setup portal (after reset)");
+    LOGLN("Opening WiFi setup portal (after reset)");
     if (openConfigPortal() && wifiLinkUp()) {
       WiFi.setAutoReconnect(true);
-      Serial.printf("Connected: %s  IP %s\n", WiFi.SSID().c_str(),
+      LOGF("Connected: %s  IP %s\n", WiFi.SSID().c_str(),
                     WiFi.localIP().toString().c_str());
       return true;
     }
-    Serial.println("WiFi connection failed");
+    LOGLN("WiFi connection failed");
     statusScreenConnectFailed();
     return false;
   }
 
-  Serial.println("Connecting to WiFi (portal opens if needed)...");
+  LOGLN("Connecting to WiFi (portal opens if needed)...");
 
   if (wifiLinkUp()) {
     WiFi.setAutoReconnect(true);
-    Serial.printf("Connected: %s  IP %s\n", WiFi.SSID().c_str(),
+    LOGF("Connected: %s  IP %s\n", WiFi.SSID().c_str(),
                   WiFi.localIP().toString().c_str());
     return true;
   }
 
   if (storedWifiCredentials() && connectSavedNetwork(true)) {
     WiFi.setAutoReconnect(true);
-    Serial.printf("Connected: %s  IP %s\n", WiFi.SSID().c_str(),
+    LOGF("Connected: %s  IP %s\n", WiFi.SSID().c_str(),
                   WiFi.localIP().toString().c_str());
     return true;
   }
 
   if (storedWifiCredentials()) {
-    Serial.println("Saved WiFi could not connect — opening setup portal");
+    LOGLN("Saved WiFi could not connect — opening setup portal");
   } else {
-    Serial.println("No saved WiFi — opening setup portal");
+    LOGLN("No saved WiFi — opening setup portal");
   }
 
   if (openConfigPortal() && wifiLinkUp()) {
     WiFi.setAutoReconnect(true);
-    Serial.printf("Connected: %s  IP %s\n", WiFi.SSID().c_str(),
+    LOGF("Connected: %s  IP %s\n", WiFi.SSID().c_str(),
                   WiFi.localIP().toString().c_str());
     return true;
   }
 
-  Serial.println("WiFi connection failed");
+  LOGLN("WiFi connection failed");
   statusScreenConnectFailed();
   return false;
 }

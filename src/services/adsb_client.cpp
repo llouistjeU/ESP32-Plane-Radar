@@ -9,6 +9,7 @@
 #include <cstring>
 
 #include "config.h"
+#include "debug.h"
 
 namespace services::adsb {
 
@@ -201,14 +202,14 @@ bool fetchUpdateOnce(double center_lat, double center_lon, float fetch_radius_km
 
   HTTPClient http;
   if (!http.begin(client, url)) {
-    Serial.println("adsb: http.begin failed");
+    LOGLN("adsb: http.begin failed");
     return false;
   }
 
   http.setTimeout(kRequestTimeoutMs);
   const int code = performGetWithPoll(http);
   if (code != HTTP_CODE_OK) {
-    Serial.printf("adsb: HTTP %d\n", code);
+    LOGF("adsb: HTTP %d\n", code);
     http.end();
     return false;
   }
@@ -248,7 +249,7 @@ bool fetchUpdateOnce(double center_lat, double center_lon, float fetch_radius_km
   // largest block = biggest single contiguous allocation still possible. If
   // this sits near ~10 KB while free heap reads ~27 KB, fragmentation is
   // confirmed as the cause of the old failures.
-  Serial.printf("adsb: content-length=%d, free heap=%u, largest block=%u, RSSI=%d dBm\n",
+  LOGF("adsb: content-length=%d, free heap=%u, largest block=%u, RSSI=%d dBm\n",
                 http.getSize(), ESP.getFreeHeap(), ESP.getMaxAllocHeap(),
                 WiFi.RSSI());
 
@@ -256,7 +257,7 @@ bool fetchUpdateOnce(double center_lat, double center_lon, float fetch_radius_km
   JsonDocument doc;
   const DeserializationError err = deserializeJson(
       doc, http.getStream(), DeserializationOption::Filter(filter));
-  Serial.printf("adsb: stream parse %lu ms, result=%s, free heap=%u\n",
+  LOGF("adsb: stream parse %lu ms, result=%s, free heap=%u\n",
                 millis() - parse_start, err.c_str(), ESP.getFreeHeap());
   http.end();
   if (err) {
@@ -291,7 +292,7 @@ bool fetchUpdateOnce(double center_lat, double center_lon, float fetch_radius_km
   }
 
   s_aircraft_count = n;
-  Serial.printf("adsb: %u aircraft\n", static_cast<unsigned>(n));
+  LOGF("adsb: %u aircraft\n", static_cast<unsigned>(n));
   return true;
 }
 
@@ -309,7 +310,7 @@ bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
       return true;
     }
     if (attempt < kMaxFetchAttempts) {
-      Serial.printf("adsb: retrying (attempt %d/%d)\n", attempt + 1,
+      LOGF("adsb: retrying (attempt %d/%d)\n", attempt + 1,
                     kMaxFetchAttempts);
     }
   }

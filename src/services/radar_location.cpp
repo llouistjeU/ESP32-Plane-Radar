@@ -5,6 +5,7 @@
 #include <cstring>
 
 #include "config.h"
+#include "debug.h"
 
 namespace services::location {
 
@@ -74,7 +75,7 @@ bool saveFromStrings(const char* lat_str, const char* lon_str) {
     return false;
   }
   persist(lat, lon);
-  Serial.printf("Radar location saved: %.6f, %.6f\n", lat, lon);
+  LOGF("Radar location saved: %.6f, %.6f\n", lat, lon);
   return true;
 }
 
